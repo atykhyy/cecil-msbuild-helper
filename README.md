@@ -45,7 +45,7 @@ preprocessor constant in your tool project and use the constructor taking
 Limitations
 -----------
 
-* Requires Mono.Cecil 0.10 or later (for jbevain/cecil#470).
+* Requires Mono.Cecil 0.10 or later (for [jbevain/cecil#470](https://github.com/jbevain/cecil/pull/470)).
 
 * The reflection importer currently requires that a `netstandard` reference
 be present, either added explicitly to compilation inputs as a `Reference` item,
@@ -58,4 +58,6 @@ custom attribute distinguishing facade assemblies.
 References
 ----------
 
-jbevain/cecil#487, jbevain/cecil#505, jbevain/cecil#526
+[jbevain/cecil#487](https://github.com/jbevain/cecil/issues/487),
+[jbevain/cecil#505](https://github.com/jbevain/cecil/issues/505),
+[jbevain/cecil#526](https://github.com/jbevain/cecil/issues/526)
