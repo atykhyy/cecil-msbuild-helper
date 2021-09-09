@@ -15,12 +15,14 @@ the post-processor itself may all belong to different target frameworks (TFMs).
 Framework types such as `System.Threading.Tasks.Task` or `System.IO.Stream`
 will exist in different metadata scopes. The default implementations of
 `IMetadataImporter` and `IReflectionImporter` are not aware of this, and will
-end up creating invalid references making the post-processed assembly unusable.
+end up creating references that make no sense in the context of the assembly
+being post-processed, such as `mscorlib!System.IO.Stream` in a `netcoreapp3.1`
+output assembly.
 In addition, post-processing tools may have trouble finding the files for
 referenced assemblies, as the process used by MSBuild is complex and poorly
 documented.
 
-This gist provides a helper class which solves most of these problems.
+This repository provides a helper class which solves most of these problems.
 It relies on the list of referenced assemblies created by MSBuild's
 compilation targets to find the assembly files and to handle both mixed-TFM
 dependencies (when dependencies of the assembly being post-processed belong
@@ -41,6 +43,23 @@ through the command line or a temporary file. MSBuild tasks can take the items
 directly as a task property; in this case, define the `WITH_MSBUILD_FRAMEWORK`
 preprocessor constant in your tool project and use the constructor taking
 `ITaskItem[]`.
+
+Caution
+-------
+
+In mixed-TFM scenarios, post-processing tools must keep `TypeReference` and
+other member references that belong to different modules strictly separate
+and never compare them, use them as dictionary keys, field types, base classes
+and so on, until imported into the assembly that is being post-processed.
+Type or member references from different modules to what are logically the same
+member will refer to different metadata scopes and will not compare equal,
+which is usually not the desired behavior. Cecil's assembly writer does not
+automatically import member references coming from different modules and will
+write the metadata scope as-is, potentially creating invalid references in the
+assembly being post-processed. Always import references into your target module
+before using them in or around it. Code that does not follow this rule will
+work while all inputs belong to the same or compatible TFMs, but will break
+in more or less unpredictable ways in cross- and/or mixed-TFM scenarios.
 
 Limitations
 -----------
