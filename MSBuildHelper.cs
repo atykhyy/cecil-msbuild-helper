@@ -33,7 +33,6 @@ namespace Cil
 
         private readonly static Version          ZeroVersion    = new Version ("0.0.0.0") ;
         private readonly static ModuleDefinition SentinelModule = ModuleDefinition.CreateModule ("<Sentinel>", 0) ;
-        private readonly static byte[]           Netstd20Token  = new byte[] { 0xcc, 0x7b, 0x13, 0xff, 0xcd, 0x2d, 0xdd, 0x51 } ;
         #endregion
 
         #region --[Constructors]------------------------------------------
@@ -252,16 +251,40 @@ namespace Cil
                 var filePath  = kv.Key ;
                 var reference = kv.Value ;
 
+                // well known .NET framework and library public key tokens
+                const ulong
+                    MscorlibToken = 0x89e03419565c7ab7,
+                    NetStdToken   = 0x51dd2dcdff137bcc,
+                    NetCoreToken  = 0x8e79a7bed785ec7c,
+                    StdlibToken   = 0x3a0ad5117f5f3fb0 ;
+
                 // prepare reverse map of framework types for reflection importer
-                // NB: this code depends on a known netstandard2.0 dependency being referenced
-                if (reference.Name == "netstandard" && Netstd20Token.SequenceEqual (reference.PublicKeyToken) &&
+                // NB: this code relies on having a netstandard dependency in project references
+                if (reference.Name == "netstandard" && GetPublicKeyToken (reference) == NetStdToken &&
                     ResolveAs (reference, filePath) is AssemblyDefinition definition)
                 {
-                    var frameworkToken      = typeof (object).Assembly.GetName ().GetPublicKeyToken () ;
+                    var frameworkToken      = GetPublicKeyToken (typeof (object).Assembly) ;
                     var frameworkAssemblies = new List<System.Reflection.Assembly> () ;
                     foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies ())
-                        if (frameworkToken.SequenceEqual (assembly.GetName ().GetPublicKeyToken ()))
-                            frameworkAssemblies.Add      (assembly) ;
+                    {
+                        // if a netstandard assembly is loaded, use it in preference of heuristic approach
+                        var token  = GetPublicKeyToken (assembly) ;
+                        if (token == NetStdToken && assembly.GetName ().Name == "netstandard")
+                        {
+                            frameworkAssemblies.Clear () ;
+                            frameworkAssemblies.Add (assembly) ;
+                            break ;
+                        }
+
+                        if (token == frameworkToken ||
+                            token == MscorlibToken  ||
+                            token == NetStdToken    ||
+                            token == NetCoreToken   ||
+                            token == StdlibToken)
+                        {
+                            frameworkAssemblies.Add (assembly) ;
+                        }
+                    }
 
                     foreach (var fullName in IsFacadeAssembly (definition) ?
                         definition.MainModule.ExportedTypes.Select (_ => _.FullName) :
@@ -278,6 +301,21 @@ namespace Cil
             }
 
             throw new InvalidOperationException ("netstandard reference assembly not found in references") ;
+        }
+
+        private static ulong GetPublicKeyToken (AssemblyNameReference reference)
+        {
+            return ToUlongToken (reference.PublicKeyToken) ;
+        }
+
+        private static ulong GetPublicKeyToken (System.Reflection.Assembly assembly)
+        {
+            return ToUlongToken (assembly.GetName ().GetPublicKeyToken ()) ;
+        }
+
+        private static ulong ToUlongToken (byte[] bytes)
+        {
+            return bytes != null && bytes.Length == 8 ? BitConverter.ToUInt64 (bytes, 0) : 0 ;
         }
         #endregion
     }
