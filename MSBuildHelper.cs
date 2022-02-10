@@ -14,6 +14,12 @@ using System ;
 using System.Collections.Generic ;
 using System.Linq ;
 using Mono.Cecil  ;
+
+#if WITH_MSBUILD_FRAMEWORK
+using ILogger = Microsoft.Build.Utilities.TaskLoggingHelper ;
+#else
+using Microsoft.Extensions.Logging ;
+#endif
 #endregion
 
 namespace Cil
@@ -30,6 +36,7 @@ namespace Cil
         private readonly HashSet<Type>                             m_frameworkTypes     = new HashSet<Type> () ;
         private readonly AssemblyNameReference                     m_frameworkReference ;
         private readonly ReaderParameters                          m_readerParameters   ;
+        private readonly ILogger                                   m_logger ;
 
         private readonly static Version          ZeroVersion    = new Version ("0.0.0.0") ;
         private readonly static ModuleDefinition SentinelModule = ModuleDefinition.CreateModule ("<Sentinel>", 0) ;
@@ -38,7 +45,7 @@ namespace Cil
         #region --[Constructors]------------------------------------------
         #if WITH_MSBUILD_FRAMEWORK
         public MSBuildHelper (Microsoft.Build.Framework.ITaskItem[] references,
-            ReaderParameters dependencyParams = null) : this (dependencyParams)
+            ILogger logger, ReaderParameters dependencyParams = null) : this (logger, dependencyParams)
         {
             foreach (var item in references ?? throw new ArgumentNullException (nameof (references)))
             {
@@ -55,19 +62,20 @@ namespace Cil
 
             m_frameworkReference = FindFrameworkReference () ;
         }
-        #endif
-
+        #else
         public MSBuildHelper (IEnumerable<KeyValuePair<string, AssemblyNameReference>> references,
-            ReaderParameters dependencyParams = null) : this (dependencyParams)
+            ILogger logger, ReaderParameters dependencyParams = null) : this (logger, dependencyParams)
         {
             foreach (var item in references ?? throw new ArgumentNullException (nameof (references)))
                 m_projectReferences.Add (item.Key, item.Value) ;
 
             m_frameworkReference = FindFrameworkReference () ;
         }
+        #endif
 
-        private MSBuildHelper (ReaderParameters dependencyParams)
+        private MSBuildHelper (ILogger logger, ReaderParameters dependencyParams)
         {
+            m_logger = logger ;
             m_readerParameters = dependencyParams ?? new ReaderParameters () ;
             m_readerParameters.AssemblyResolver = this ;
         }
@@ -211,8 +219,10 @@ namespace Cil
             {
                 var et = assembly.MainModule.ExportedTypes.FirstOrDefault (_ => _.FullName == fullName) ;
                 if (et == null)
-                    throw new KeyNotFoundException (String.Format (
-                        "Framework type {0}!{1} was not found in target framework references", reference.Name, fullName)) ;
+                {
+                    m_logger?.LogError ("{0}: framework type {1}, {2} not found in target framework references", module.Name, fullName, reference) ;
+                    goto import ;
+                }
 
                 reference = (AssemblyNameReference) et.Scope ;
 
@@ -229,6 +239,7 @@ namespace Cil
                 reference = assembly.Name ;
             }
 
+        import:
             // work around ModuleDefinition.MetadataImporter being internal:
             // import scope by means of importing a fake type reference
             // (from a fake sentinel module to avoid stack overflow)
