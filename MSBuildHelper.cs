@@ -161,16 +161,18 @@ namespace Cil
         sealed class CrossTfmMetadataImporter : DefaultMetadataImporter
         {
             private readonly MSBuildHelper m_helper ;
+            private readonly AssemblyNameReference[] m_refs ;
 
             public CrossTfmMetadataImporter (ModuleDefinition module, MSBuildHelper helper) : base (module)
             {
                 m_helper = helper ;
+                m_refs   = module.AssemblyReferences.ToArray () ;
             }
 
             protected override IMetadataScope ImportScope (TypeReference type)
             {
                 return type.Module != SentinelModule && type.Scope is AssemblyNameReference reference ?
-                    m_helper.ImportCrossTfmScope (module, type.FullName, false, reference) : base.ImportScope (type) ;
+                    m_helper.ImportCrossTfmScope (module, m_refs, reference, type.FullName) : base.ImportScope (type) ;
             }
         }
         #endregion
@@ -184,10 +186,12 @@ namespace Cil
         sealed class CrossTfmReflectionImporter : DefaultReflectionImporter
         {
             private readonly MSBuildHelper m_helper ;
+            private readonly AssemblyNameReference[] m_refs ;
 
             public CrossTfmReflectionImporter (ModuleDefinition module, MSBuildHelper helper) : base (module)
             {
                 m_helper = helper ;
+                m_refs   = module.AssemblyReferences.ToArray () ;
             }
 
             protected override IMetadataScope ImportScope (Type type)
@@ -207,14 +211,46 @@ namespace Cil
                 else
                     reference = m_helper.m_frameworkReference ;
 
-                return m_helper.ImportCrossTfmScope (module, type.FullName.Replace ('+', '/'), true, reference) ;
+                return m_helper.ImportCrossTfmScope (module, m_refs, reference, type.FullName.Replace ('+', '/')) ;
             }
         }
         #endregion
 
         #region --[Methods: Private]--------------------------------------
-        private IMetadataScope ImportCrossTfmScope (ModuleDefinition module, string fullName, bool autoUnify, AssemblyNameReference reference)
+        private IMetadataScope ImportCrossTfmScope (ModuleDefinition module, AssemblyNameReference[] originalReferences,
+            AssemblyNameReference reference, string fullName)
         {
+            // use the results of the compiler's processing of referenced assemblies
+            // eg if the compiler unified A,1.0.0.0 with A,1.1.0.0 then I have to follow
+            AssemblyNameReference originalExact = null ;
+            AssemblyNameReference originalRedir = null ;
+
+            foreach (var original in originalReferences)
+            {
+                if (original.Name != reference.Name || !original.PublicKeyToken.SequenceEqual (reference.PublicKeyToken))
+                    continue ;
+
+                if (original.Version == reference.Version)
+                {
+                    originalExact = original ;
+                    break ;
+                }
+                else
+                if (originalRedir == null)
+                {
+                    originalRedir = original ;
+                }
+                else
+                {
+                    m_logger?.LogError ("{0}: {1} is ambiguous between {2} and {3}", module.Name, reference, original, originalRedir) ;
+                    goto import ;
+                }
+            }
+
+            // return original references in the module as-is
+            if (originalExact != null) return originalExact ;
+            if (originalRedir != null) return originalRedir ;
+
             var assembly  = module.AssemblyResolver.Resolve (reference) ;
             if (assembly == null)
             {
@@ -239,7 +275,7 @@ namespace Cil
                     reference = m_projectReferences[ResolveToCodeBase (reference)] ;
             }
             else
-            if (autoUnify && reference.Version != assembly.Name.Version)
+            if (reference.Version != assembly.Name.Version)
             {
                 // version mismatch between compilation inputs and what is loaded at runtime
                 // prefer compilation input
