@@ -124,11 +124,18 @@ namespace Cil
                     return kv.Key ;
 
             // try to bind by simple name as a fallback
+            KeyValuePair<string, AssemblyNameReference> found = default ;
             foreach (var kv in m_projectReferences)
                 if (kv.Value.Name == name.Name)
-                    return kv.Key ;
+                    if (found.Key != null)
+                    {
+                        m_logger?.LogWarning ("{0} is ambiguous between {1} ({2}) and {3} ({4})", name, found.Value, found.Key, kv.Value, kv.Key) ;
+                        return null ;
+                    }
+                    else
+                        found = kv ;
 
-            return null ;
+            return found.Key ;
         }
 
         private AssemblyDefinition ResolveAs (AssemblyNameReference name, string fullPath)
